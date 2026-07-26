@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+import sys
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -118,7 +120,10 @@ def print_sessions(sessions: list[dict]):
 
 
 async def ainput(prompt: str = "") -> str:
-    return await asyncio.to_thread(input, prompt)
+    try:
+        return await asyncio.to_thread(input, prompt)
+    except asyncio.CancelledError:
+        raise KeyboardInterrupt()
 
 
 async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
@@ -206,7 +211,10 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
             console.print(f"[red]Unknown command: {text}[/]")
             continue
 
-        await _run_single_prompt(agent, text)
+        try:
+            await _run_single_prompt(agent, text)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            console.print("\n[yellow]Interrupted[/]")
 
 
 async def _run_single_prompt(agent: Agent, text: str) -> None:
@@ -231,3 +239,30 @@ async def _run_single_prompt(agent: Agent, text: str) -> None:
                 console.print(f"\n[dim]▲ {u.get('input_tokens', '?')} in / {u.get('output_tokens', '?')} out / {u.get('total_tokens', '?')} total[/]")
     except Exception as exc:
         console.print(f"[red]Agent error: {exc}[/]")
+
+
+def main() -> int:
+    args = [a for a in sys.argv[1:] if a]
+    model: str | None = None
+    prompt: str | None = None
+    i = 0
+    while i < len(args):
+        if args[i] in ("-m", "--model") and i + 1 < len(args):
+            model = args[i + 1]
+            i += 2
+        elif args[i] in ("-p", "--prompt") and i + 1 < len(args):
+            prompt = args[i + 1]
+            i += 2
+        elif args[i] in ("-h", "--help"):
+            print("Usage: ownagent [--model NAME] [--prompt TEXT]")
+            print("  --model, -m     Model name (e.g. deepseek/deepseek-chat)")
+            print("  --prompt, -p    Run a single prompt non-interactively")
+            return 0
+        else:
+            i += 1
+
+    try:
+        asyncio.run(run_cli(model=model, prompt=prompt))
+    except KeyboardInterrupt:
+        pass
+    return 0

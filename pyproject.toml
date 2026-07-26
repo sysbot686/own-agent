@@ -21,7 +21,7 @@ dependencies = [
 dev = ["pytest"]
 
 [project.scripts]
-own-agent = "own_agent.cli:main"
+ownagent = "own_agent.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["own_agent*"]
