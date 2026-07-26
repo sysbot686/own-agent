@@ -8,6 +8,8 @@ from own_agent.permissions.types import PermissionMode
 
 logger = logging.getLogger("own-agent.permissions")
 
+_SENSITIVE_KINDS = frozenset({"write", "edit", "shell", "python_exec"})
+
 
 @dataclass
 class ApprovalResult:
@@ -33,22 +35,14 @@ class PermissionManager:
             logger.info("BYPASS: %s — %s", action, details[:200])
             return ApprovalResult(approved=True, reason="bypass mode")
 
-        sensitive = any(k in details.lower() for k in ("write", "edit", "shell", "python_exec"))
-
         if self.mode == PermissionMode.LENIENT:
-            if not sensitive:
+            if not any(k in details.lower() for k in _SENSITIVE_KINDS):
                 return ApprovalResult(approved=True, reason="lenient: non-sensitive")
-            if self._on_request:
-                result = self._on_request(action, details, self.mode)
-                return ApprovalResult(approved=result)
 
-        if self.mode in (PermissionMode.STANDARD, PermissionMode.AGGRESSIVE):
-            if self._on_request:
-                result = self._on_request(action, details, self.mode)
-                return ApprovalResult(approved=result)
-            return ApprovalResult(approved=False, reason="no approval callback configured")
+        if self._on_request:
+            return ApprovalResult(approved=self._on_request(action, details, self.mode))
 
-        return ApprovalResult(approved=False, reason=f"unknown mode: {self.mode}")
+        return ApprovalResult(approved=False, reason="no approval callback configured")
 
     def make_callback(self) -> Callable[[str, str], bool]:
         def _cb(action: str, details: str) -> bool:

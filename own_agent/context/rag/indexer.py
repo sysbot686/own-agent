@@ -41,7 +41,7 @@ class Bm25Indexer:
         self._avgdl = sum(self._doc_lens) / max(n, 1)
 
         self._idf = {
-            term: math.log((n - freq + 0.5) / (freq + 0.5) + 1.0)
+            term: math.log((n - freq + 0.5) / (freq + 0.5))
             for term, freq in df.items()
         }
         self._ready = True

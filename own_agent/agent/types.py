@@ -23,4 +23,5 @@ class AgentEvent:
 class AgentConfig:
     max_tool_rounds: int = 20
     max_tool_errors: int = 5
-    strip_system_prompt: bool = True
+    temperature: float = 0.0
+    max_tokens: int = 16384

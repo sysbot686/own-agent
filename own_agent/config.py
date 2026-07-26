@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -108,6 +109,10 @@ def default_global_config_path() -> Path:
 
 
 def _default_global_config_path() -> Path:
+    if sys.platform == "win32":
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            return Path(appdata) / "own-agent" / "config.toml"
     config_home = os.getenv("XDG_CONFIG_HOME")
     if config_home:
         return Path(config_home) / "own-agent" / "config.toml"

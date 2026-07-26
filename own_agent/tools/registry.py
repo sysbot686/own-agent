@@ -28,10 +28,10 @@ class ToolRegistry:
     def has(self, name: str) -> bool:
         return name in self._tools
 
-    def call(self, name: str, ctx: ExecutionContext | None = None, **kwargs: Any) -> str:
+    def call(self, name: str, ctx: ExecutionContext | None = None, **kwargs: Any) -> ToolResult | str:
         pair = self.get(name)
         if pair is None:
-            return f"Error: unknown tool '{name}'"
+            return ToolResult(success=False, error=f"unknown tool '{name}'")
         spec, impl = pair
 
         if spec.permission and ctx is not None and ctx.request_approval is not None:
@@ -41,13 +41,13 @@ class ToolRegistry:
                 details,
             )
             if not approved:
-                return f"Error: permission denied for tool '{name}'"
+                return ToolResult(success=False, error=f"permission denied for tool '{name}'")
 
         try:
             result = impl(ctx=ctx, **kwargs)
         except Exception as exc:
-            return f"Error executing tool '{name}': {exc}"
+            return ToolResult(success=False, error=str(exc))
 
         if isinstance(result, ToolResult):
-            return result.output if result.success else f"Error: {result.error}"
-        return str(result)
+            return result
+        return ToolResult(success=True, output=str(result))

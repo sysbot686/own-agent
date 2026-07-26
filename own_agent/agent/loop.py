@@ -51,6 +51,9 @@ class Agent:
     def set_rag(self, rag: RagManager | None) -> None:
         self._rag = rag
 
+    def set_provider(self, provider: ChatProvider) -> None:
+        self._provider = provider
+
     async def run(self, user_input: str) -> AsyncIterator[AgentEvent]:
         self._sessions.add_message(ChatMessage(role="user", content=user_input))
 
@@ -83,8 +86,8 @@ class Agent:
                 messages=messages,
                 tools=self._get_tool_definitions(),
                 tool_choice="auto",
-                temperature=0.0,
-                max_tokens=16384,
+                temperature=self._config.temperature,
+                max_tokens=self._config.max_tokens,
             )
 
             events: list[AgentEvent] = []
@@ -150,14 +153,18 @@ class Agent:
                 )
 
                 for tc in response.tool_calls:
-                    result = await asyncio.to_thread(self._tools.call, tc.name, ctx=ctx, **tc.arguments)
-                    yield AgentEvent(kind="tool_result", tool_call_id=tc.id, tool_name=tc.name, tool_result=result)
-                    if result.startswith("Error"):
+                    tool_result = await asyncio.to_thread(self._tools.call, tc.name, ctx=ctx, **tc.arguments)
+                    if isinstance(tool_result, ToolResult) and not tool_result.success:
+                        content = f"Error: {tool_result.error}"
                         tool_errors += 1
-
+                    elif isinstance(tool_result, ToolResult):
+                        content = tool_result.output
+                    else:
+                        content = str(tool_result)
+                    yield AgentEvent(kind="tool_result", tool_call_id=tc.id, tool_name=tc.name, tool_result=content)
                     self._sessions.add_message(ChatMessage(
                         role="tool",
-                        content=result[:10000],
+                        content=content[:10000],
                         tool_call_id=tc.id,
                     ))
 

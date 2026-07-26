@@ -63,7 +63,7 @@ def _get_permission_mode(config) -> PermissionMode:
         return PermissionMode.STANDARD
 
 
-def _interactive_approval(action: str, details: str, _mode) -> bool:
+def _interactive_approval(action: str, details: str, _mode: object = None) -> bool:
     console.print()
     console.print(Panel(f"[yellow]Permission Request[/]\n[b]{action}[/]\n{details[:500]}", title="⚠️  Approval"))
     while True:
@@ -196,7 +196,7 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
                 console.print(f"[red]Session not found: {sid}[/]")
             continue
         if text == "/clear":
-            os.system("cls" if sys.platform == "win32" else "clear")
+            console.clear()
             continue
         if text == "/status":
             cur = session_mgr.current
@@ -209,7 +209,7 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
             new_model = text[7:].strip()
             if new_model:
                 provider = _build_provider(config, model=new_model)
-                agent._provider = provider
+                agent.set_provider(provider)
                 console.print(f"[green]Switched to model: {new_model}[/]")
             continue
         if text == "/reindex":

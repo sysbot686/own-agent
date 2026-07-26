@@ -16,7 +16,7 @@ BINARY_EXTENSIONS = frozenset({
 SKIP_DIRS = frozenset({
     ".venv", "venv", "env", ".git", "__pycache__",
     "node_modules", ".idea", ".vscode", ".tox",
-    ".eggs", "*.egg-info", ".mypy_cache", ".pytest_cache",
+    ".eggs", ".mypy_cache", ".pytest_cache",
 })
 
 
