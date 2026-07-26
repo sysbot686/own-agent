@@ -102,11 +102,3 @@
    c. "length" / "error" → 返回错误信息
 7. 最终响应返回给 TUI/CLI 展示
 ```
-
-## 与 FirstCoder 的主要差异
-- 去掉 benchmark/eval 模块
-- TUI 用 prompt_toolkit + Rich 替代 Textual
-- 去掉 MCP client、Skills 系统
-- 上下文压缩简化为 token 计数 + 截断
-- 权限系统简化为三种模式
-- 代码量控制在 3000-5000 行
