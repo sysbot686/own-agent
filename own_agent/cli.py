@@ -5,8 +5,6 @@ import os
 import sys
 from pathlib import Path
 
-import sys
-
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable
 
 from own_agent.permissions.types import PermissionMode
+
+logger = logging.getLogger("own-agent.permissions")
 
 
 @dataclass
@@ -27,6 +30,7 @@ class PermissionManager:
 
     def request(self, action: str, details: str) -> ApprovalResult:
         if self.mode == PermissionMode.BYPASS:
+            logger.info("BYPASS: %s — %s", action, details[:200])
             return ApprovalResult(approved=True, reason="bypass mode")
 
         sensitive = any(k in details.lower() for k in ("write", "edit", "shell", "python_exec"))
@@ -38,13 +42,7 @@ class PermissionManager:
                 result = self._on_request(action, details, self.mode)
                 return ApprovalResult(approved=result)
 
-        if self.mode == PermissionMode.STANDARD:
-            if self._on_request:
-                result = self._on_request(action, details, self.mode)
-                return ApprovalResult(approved=result)
-            return ApprovalResult(approved=False, reason="no approval callback configured")
-
-        if self.mode == PermissionMode.AGGRESSIVE:
+        if self.mode in (PermissionMode.STANDARD, PermissionMode.AGGRESSIVE):
             if self._on_request:
                 result = self._on_request(action, details, self.mode)
                 return ApprovalResult(approved=result)

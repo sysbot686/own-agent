@@ -96,14 +96,20 @@ VIEW_SPEC = ToolSpec(
 
 
 def write(file_path: str, content: str, ctx: ExecutionContext | None = None, **kwargs) -> str:
-    target = Path(file_path)
+    if ctx is not None:
+        resolved = ctx.resolve_path(file_path)
+        if resolved is None:
+            return f"Error: path outside workspace: {file_path}"
+        target = resolved
+    else:
+        target = Path(file_path)
 
     if target.exists() and not target.is_file():
         return f"Error: {file_path} exists but is not a file"
 
     if ctx is not None and ctx.request_approval is not None:
         exists = target.exists()
-        details = f"{'Overwrite' if exists else 'Create'}: {file_path} ({len(content)} chars)"
+        details = f"{'Overwrite' if exists else 'Create'}: {target} ({len(content)} chars)"
         approved = ctx.request_approval("Tool: write", details)
         if not approved:
             return f"Error: permission denied for write({file_path})"
@@ -140,7 +146,13 @@ WRITE_SPEC = ToolSpec(
 
 
 def edit(file_path: str, old_string: str, new_string: str, ctx: ExecutionContext | None = None, **kwargs) -> str:
-    target = Path(file_path)
+    if ctx is not None:
+        resolved = ctx.resolve_path(file_path)
+        if resolved is None:
+            return f"Error: path outside workspace: {file_path}"
+        target = resolved
+    else:
+        target = Path(file_path)
     if not target.exists():
         return f"Error: file not found: {file_path}"
 

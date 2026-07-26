@@ -139,8 +139,8 @@ class Agent:
 
             if finish == "tool_calls" and response.tool_calls:
                 ctx = ExecutionContext(
-                    config=None,  # type: ignore
                     cwd=self._sessions.current.metadata.get("cwd", ".") if self._sessions.current else ".",
+                    workspace_root=".",
                     request_approval=self._permissions.make_callback(),
                 )
 
