@@ -15,7 +15,7 @@ from rich.table import Table
 from own_agent.agent.loop import Agent
 from own_agent.agent.types import AgentConfig
 from own_agent.config import load_config
-from own_agent.context.manager import ContextManager
+from own_agent.context.rag.manager import RagConfig, RagManager
 from own_agent.permissions.manager import PermissionManager
 from own_agent.permissions.types import PermissionMode
 from own_agent.providers.presets import ProviderPreset, get_preset
@@ -99,6 +99,8 @@ def print_help():
         "  /model <m>   Switch model\n"
         "  /clear       Clear screen\n"
         "  /status      Show session info\n"
+        "  /reindex     Re-index project for RAG\n"
+        "  /rag on/off  Enable/disable RAG\n"
     ))
 
 
@@ -140,17 +142,24 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
     session_mgr = SessionManager(session_store)
     session_mgr.new(title="main")
 
-    context_mgr = ContextManager(max_tokens=128000)
+    rag_mgr = RagManager(project_root=".")
+    rag_enabled = True
+    try:
+        await rag_mgr.index_project()
+        if rag_mgr.total_chunks > 0:
+            console.print(f"[dim]Indexed {rag_mgr.total_chunks} chunks for RAG[/]")
+    except Exception as exc:
+        console.print(f"[dim]RAG index failed: {exc}[/]")
 
     agent_config = AgentConfig()
     agent = Agent(
         provider=provider,
         tool_registry=tool_registry,
         session_manager=session_mgr,
-        context_manager=context_mgr,
         permission_manager=perm_mgr,
         config=agent_config,
     )
+    agent.set_rag(rag_mgr if rag_enabled else None)
 
     print_welcome()
 
@@ -176,8 +185,6 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
             continue
         if text == "/new":
             session_mgr.new()
-            context_mgr = ContextManager(max_tokens=128000)
-            agent._context = context_mgr
             console.print("[green]New session started[/]")
             continue
         if text == "/sessions":
@@ -206,6 +213,23 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
                 provider = _build_provider(config, model=new_model)
                 agent._provider = provider
                 console.print(f"[green]Switched to model: {new_model}[/]")
+            continue
+        if text == "/reindex":
+            try:
+                await rag_mgr.index_project()
+                console.print(f"[green]Re-indexed {rag_mgr.total_chunks} chunks[/]")
+            except Exception as exc:
+                console.print(f"[red]Re-index failed: {exc}[/]")
+            continue
+        if text == "/rag on":
+            rag_enabled = True
+            agent.set_rag(rag_mgr)
+            console.print("[green]RAG enabled[/]")
+            continue
+        if text == "/rag off":
+            rag_enabled = False
+            agent.set_rag(None)
+            console.print("[yellow]RAG disabled[/]")
             continue
         if text.startswith("/"):
             console.print(f"[red]Unknown command: {text}[/]")

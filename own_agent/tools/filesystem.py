@@ -199,6 +199,18 @@ EDIT_SPEC = ToolSpec(
 )
 
 
+SKIP_DIRS_GREP = frozenset({
+    ".venv", "venv", "env", ".git", "__pycache__",
+    "node_modules", ".idea", ".vscode", ".tox",
+    ".eggs", ".mypy_cache", ".pytest_cache",
+})
+
+
+def _should_skip(dirpath: str) -> bool:
+    parts = Path(dirpath).parts
+    return any(p in SKIP_DIRS_GREP or p.endswith(".egg-info") for p in parts)
+
+
 def grep(pattern: str, path: str = ".", include: str = "", **kwargs) -> str:
     root = Path(path)
     if not root.exists():
@@ -214,6 +226,8 @@ def grep(pattern: str, path: str = ".", include: str = "", **kwargs) -> str:
     max_results = 200
 
     for dirpath, _dirnames, filenames in os.walk(root):
+        if _should_skip(dirpath):
+            continue
         for fname in filenames:
             if include_pat and not include_pat.search(fname):
                 continue
@@ -272,14 +286,14 @@ def glob(pattern: str, path: str = ".", **kwargs) -> str:
         return f"Error: path not found: {path}"
 
     if "**" in pattern:
-        iterator = root.rglob(pattern)
+        all_files = list(root.rglob(pattern))
     else:
-        iterator = root.glob(pattern)
+        all_files = list(root.glob(pattern))
 
     matches = sorted(
         str(p.relative_to(root) if p.is_relative_to(root) else p)
-        for p in iterator
-        if p.exists()
+        for p in all_files
+        if p.exists() and not _should_skip(str(p))
     )
     if not matches:
         return "(no matches)"

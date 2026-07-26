@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import subprocess
 import sys
 import textwrap
@@ -10,7 +12,7 @@ from own_agent.tools.types import ToolSpec
 def shell(
     command: str,
     description: str = "",
-    timeout: int = 120,
+    timeout: int = 30,
     workdir: str | None = None,
     **kwargs,
 ) -> str:
@@ -59,8 +61,8 @@ SHELL_SPEC = ToolSpec(
             },
             "timeout": {
                 "type": "integer",
-                "description": "Timeout in seconds (default 120).",
-                "default": 120,
+                "description": "Timeout in seconds (default 30).",
+                "default": 30,
             },
             "workdir": {
                 "type": "string",
@@ -79,28 +81,31 @@ def python_exec(code: str, **kwargs) -> str:
         "import ast, base64, collections, datetime, functools, glob, hashlib, itertools, "
         "json, math, os, pathlib, random, re, statistics, sys, textwrap, typing, urllib, uuid"
     )
-    wrapped = textwrap.dedent(f"""\
-        {imports}
-        _result = None
-        try:
-{textwrap.indent(code, '            ')}
-        except Exception as _e:
-            _result = f"Error: {{_e}}"
-    """)
     namespace: dict[str, object] = {}
+    _buf = io.StringIO()
+    _old = sys.stdout
+    sys.stdout = _buf
     try:
-        exec(wrapped, namespace)
+        exec(f"{imports}\n{code}", namespace)
+        _captured = _buf.getvalue()
     except Exception as exc:
+        _buf.close()
+        sys.stdout = _old
         return f"Error: {exc}"
+    sys.stdout = _old
+    _buf.close()
+
     result = namespace.get("_result")
-    if result is None:
-        return "(no result variable set)"
-    return str(result)
+    if result is not None:
+        return str(result).rstrip()
+    if _captured:
+        return _captured.rstrip()
+    return "(no result)"
 
 
 PYTHON_EXEC_SPEC = ToolSpec(
     name="python_exec",
-    description="Execute Python code in an isolated sandbox. Set `_result` to capture output.",
+    description="Execute Python code in an isolated sandbox. Captures stdout; set `_result` for explicit return.",
     parameters={
         "type": "object",
         "properties": {

@@ -240,7 +240,7 @@ def _to_openai_msg(msg: ChatMessage) -> dict[str, Any]:
             }}
             for tc in msg.tool_calls
         ]
-    if msg.name:
+    if msg.name and msg.role != "tool":
         d["name"] = msg.name
     if msg.tool_call_id:
         d["tool_call_id"] = msg.tool_call_id

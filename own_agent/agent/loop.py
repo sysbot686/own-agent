@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from own_agent.agent.types import AgentConfig, AgentEvent
-from own_agent.context.manager import ContextManager
+from own_agent.context.rag.manager import RagManager
 from own_agent.permissions.manager import PermissionManager
 from own_agent.providers.base import ChatProvider
 from own_agent.providers.types import (
@@ -37,16 +37,18 @@ class Agent:
         provider: ChatProvider,
         tool_registry: ToolRegistry,
         session_manager: SessionManager,
-        context_manager: ContextManager,
         permission_manager: PermissionManager,
         config: AgentConfig | None = None,
     ) -> None:
         self._provider = provider
         self._tools = tool_registry
         self._sessions = session_manager
-        self._context = context_manager
         self._permissions = permission_manager
         self._config = config or AgentConfig()
+        self._rag: RagManager | None = None
+
+    def set_rag(self, rag: RagManager | None) -> None:
+        self._rag = rag
 
     async def run(self, user_input: str) -> AsyncIterator[AgentEvent]:
         self._sessions.add_message(ChatMessage(role="user", content=user_input))
@@ -62,8 +64,15 @@ class Agent:
                 role="system",
                 content=self._build_system_prompt(),
             )
-            ctx_messages = self._context.compressed()
-            messages = [system_msg] + ctx_messages + self._sessions.all_messages()
+
+            rag_context = ""
+            if self._rag:
+                rag_context = await self._rag.retrieve_context(user_input)
+
+            messages = [system_msg]
+            if rag_context:
+                messages.append(ChatMessage(role="system", content=rag_context))
+            messages += self._sessions.all_messages()
 
             request = ChatRequest(
                 messages=messages,
@@ -117,7 +126,6 @@ class Agent:
                 tool_calls=response.tool_calls or None,
             )
             self._sessions.add_message(assistant_msg)
-            self._context.add_messages([assistant_msg])
 
             if finish == "stop":
                 yield AgentEvent(kind="done", finish_reason="stop", usage=self._combine_usage(all_usage))
@@ -146,7 +154,6 @@ class Agent:
                         role="tool",
                         content=result[:10000],
                         tool_call_id=tc.id,
-                        name=tc.name,
                     ))
 
                 if tool_errors >= self._config.max_tool_errors:
