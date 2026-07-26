@@ -33,7 +33,7 @@ def _build_provider(config, model: str | None = None):
 
     api_key = config.get_provider_value(
         "api_key", env=preset.api_key_env,
-    ) or ""
+    ) or config.get_env(preset.api_key_env) or ""
     base_url = config.get_provider_value(
         "base_url", env=preset.base_url_env, default=preset.default_base_url,
     )
