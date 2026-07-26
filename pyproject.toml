@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "own-agent"
+version = "0.1.0"
+description = "A local Python coding agent for learning."
+requires-python = ">=3.11"
+dependencies = [
+    "openai",
+    "anthropic",
+    "prompt_toolkit",
+    "rich",
+    "python-dotenv",
+    "pydantic",
+    "anyio",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+own-agent = "own_agent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["own_agent*"]
