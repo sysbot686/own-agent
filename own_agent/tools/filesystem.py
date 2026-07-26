@@ -8,8 +8,11 @@ from own_agent.tools.context import ExecutionContext
 from own_agent.tools.types import ToolResult, ToolSpec
 
 
-def ls(path: str = "", **kwargs) -> str:
-    target = Path(path) if path else Path.cwd()
+def ls(path: str = "", ctx: ExecutionContext | None = None, **kwargs) -> str:
+    if not path and ctx:
+        target = Path(ctx.cwd)
+    else:
+        target = Path(path) if path else Path.cwd()
     if not target.exists():
         return f"Error: path not found: {target}"
     if target.is_file():
@@ -39,8 +42,11 @@ LS_SPEC = ToolSpec(
 )
 
 
-def view(file_path: str, offset: int = 1, limit: int = 200, **kwargs) -> str:
-    target = Path(file_path)
+def view(file_path: str, offset: int = 1, limit: int = 200, ctx: ExecutionContext | None = None, **kwargs) -> str:
+    if ctx is not None:
+        target = ctx.abs_path(file_path)
+    else:
+        target = Path(file_path)
     if not target.exists():
         return f"Error: file not found: {file_path}"
     if target.is_dir():
@@ -107,13 +113,6 @@ def write(file_path: str, content: str, ctx: ExecutionContext | None = None, **k
     if target.exists() and not target.is_file():
         return f"Error: {file_path} exists but is not a file"
 
-    if ctx is not None and ctx.request_approval is not None:
-        exists = target.exists()
-        details = f"{'Overwrite' if exists else 'Create'}: {target} ({len(content)} chars)"
-        approved = ctx.request_approval("Tool: write", details)
-        if not approved:
-            return f"Error: permission denied for write({file_path})"
-
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
@@ -164,17 +163,12 @@ def edit(file_path: str, old_string: str, new_string: str, ctx: ExecutionContext
     count = text.count(old_string)
     if count == 0:
         return f"Error: old_string not found in {file_path}"
-    if count > 1 and "replace_all" not in kwargs:
+    replace_all = kwargs.get("replace_all", False)
+    if count > 1 and not replace_all:
         return (
             f"Error: old_string appears {count} times in {file_path}. "
             "Use replace_all=True to replace all, or make old_string more specific."
         )
-
-    if ctx is not None and ctx.request_approval is not None:
-        details = f"Edit: {file_path}\n--- old ---\n{old_string[:200]}\n--- new ---\n{new_string[:200]}"
-        approved = ctx.request_approval("Tool: edit", details)
-        if not approved:
-            return f"Error: permission denied for edit({file_path})"
 
     new_text = text.replace(old_string, new_string)
     try:
@@ -203,6 +197,10 @@ EDIT_SPEC = ToolSpec(
                 "type": "string",
                 "description": "Replacement text.",
             },
+            "replace_all": {
+                "type": "boolean",
+                "description": "Replace all occurrences when old_string appears multiple times (default: false).",
+            },
         },
         "required": ["file_path", "old_string", "new_string"],
     },
@@ -223,8 +221,11 @@ def _should_skip(dirpath: str) -> bool:
     return any(p in SKIP_DIRS_GREP or p.endswith(".egg-info") for p in parts)
 
 
-def grep(pattern: str, path: str = ".", include: str = "", **kwargs) -> str:
-    root = Path(path)
+def grep(pattern: str, path: str = ".", include: str = "", ctx: ExecutionContext | None = None, **kwargs) -> str:
+    if ctx is not None:
+        root = ctx.abs_path(path)
+    else:
+        root = Path(path)
     if not root.exists():
         return f"Error: path not found: {path}"
 
@@ -292,8 +293,11 @@ GREP_SPEC = ToolSpec(
 )
 
 
-def glob(pattern: str, path: str = ".", **kwargs) -> str:
-    root = Path(path)
+def glob(pattern: str, path: str = ".", ctx: ExecutionContext | None = None, **kwargs) -> str:
+    if ctx is not None:
+        root = ctx.abs_path(path)
+    else:
+        root = Path(path)
     if not root.exists():
         return f"Error: path not found: {path}"
 

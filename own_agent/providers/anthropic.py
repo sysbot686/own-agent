@@ -11,7 +11,8 @@ from own_agent.providers.base import ChatProvider
 from own_agent.providers.errors import ProviderError, ProviderErrorKind, classify_exception
 from own_agent.providers.types import (
     ChatMessage, ChatRequest, ChatResponse, ChatStreamEvent,
-    FinishReason, ProviderCapabilities, ProviderDiagnostics, ToolCall, ToolChoice, ToolChoiceFunction,
+    FinishReason, ProviderCapabilities, ProviderDiagnostics,
+    TokenUsage, ToolCall, ToolChoice, ToolChoiceFunction,
 )
 
 
@@ -214,4 +215,4 @@ def _parse_usage(usage: Any):
     out = _field(usage, "output_tokens") or _field(usage, "completion_tokens")
     if inp is None and out is None:
         return None
-    return type("TokenUsage", (), {"input_tokens": inp, "output_tokens": out, "total_tokens": (inp or 0) + (out or 0) if inp is not None and out is not None else None})()
+    return TokenUsage(input_tokens=inp, output_tokens=out, total_tokens=(inp or 0) + (out or 0) if inp is not None and out is not None else None)

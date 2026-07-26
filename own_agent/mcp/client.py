@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from own_agent.tools.types import ToolSpec
@@ -11,7 +11,7 @@ from own_agent.tools.types import ToolSpec
 @dataclass
 class McpServerConfig:
     command: str
-    args: list[str] = list
+    args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
 
 

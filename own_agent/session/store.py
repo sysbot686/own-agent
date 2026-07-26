@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from own_agent.providers.types import ChatMessage
+from own_agent.providers.types import ChatMessage, ToolCall
 from own_agent.session.types import Session
 
 
@@ -42,7 +42,7 @@ def _msg_from_dict(d: dict) -> ChatMessage:
         name=d.get("name"),
         tool_call_id=d.get("tool_call_id"),
         tool_calls=[
-            type("ToolCall", (), {"id": tc["id"], "name": tc["name"], "arguments": tc.get("arguments", {})})
+            ToolCall(id=tc["id"], name=tc["name"], arguments=tc.get("arguments", {}))
             for tc in d.get("tool_calls", [])
         ] if d.get("tool_calls") else None,
     )
@@ -91,9 +91,11 @@ class SessionStore:
         index = _load_index(self._base)
         entry = index.get(sid)
         messages: list[ChatMessage] = []
-        for line in fpath.read_text(encoding="utf-8").strip().splitlines():
-            if line.strip():
-                messages.append(_msg_from_dict(json.loads(line)))
+        with fpath.open(encoding="utf-8") as _fh:
+            for line in _fh:
+                line = line.strip()
+                if line:
+                    messages.append(_msg_from_dict(json.loads(line)))
 
         if entry is None:
             return None

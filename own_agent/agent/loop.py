@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 from own_agent.agent.types import AgentConfig, AgentEvent
@@ -65,9 +66,13 @@ class Agent:
                 content=self._build_system_prompt(),
             )
 
+            rag_query = user_input
+            if self._rag and tool_rounds > 1:
+                recent = self._sessions.all_messages()[-4:]
+                rag_query = " ".join(m.content for m in recent if m.content and m.role in ("user", "assistant")) or user_input
             rag_context = ""
             if self._rag:
-                rag_context = await self._rag.retrieve_context(user_input)
+                rag_context = await self._rag.retrieve_context(rag_query)
 
             messages = [system_msg]
             if rag_context:
@@ -145,7 +150,7 @@ class Agent:
                 )
 
                 for tc in response.tool_calls:
-                    result = self._tools.call(tc.name, ctx=ctx, **tc.arguments)
+                    result = await asyncio.to_thread(self._tools.call, tc.name, ctx=ctx, **tc.arguments)
                     yield AgentEvent(kind="tool_result", tool_call_id=tc.id, tool_name=tc.name, tool_result=result)
                     if result.startswith("Error"):
                         tool_errors += 1

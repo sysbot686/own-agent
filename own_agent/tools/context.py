@@ -31,3 +31,9 @@ class ExecutionContext:
             return p
         except ValueError:
             return None
+
+    def abs_path(self, path: str) -> Path:
+        p = Path(path)
+        if not p.is_absolute():
+            p = Path(self.cwd) / p
+        return p.resolve()

@@ -15,7 +15,8 @@ from own_agent.providers.base import ChatProvider
 from own_agent.providers.errors import ProviderError, ProviderErrorKind, classify_error, classify_exception
 from own_agent.providers.types import (
     ChatMessage, ChatRequest, ChatResponse, ChatStreamEvent,
-    FinishReason, ProviderCapabilities, ProviderDiagnostics, ToolCall, ToolChoice, ToolChoiceFunction,
+    FinishReason, ProviderCapabilities, ProviderDiagnostics,
+    TokenUsage, ToolCall, ToolChoice, ToolChoiceFunction,
 )
 
 
@@ -227,19 +228,23 @@ def _parse_usage(usage: Any):
     total = _field(usage, "total_tokens")
     if inp is None and out is None and total is None:
         return None
-    return type("TokenUsage", (), {"input_tokens": inp, "output_tokens": out, "total_tokens": total})()
+    return TokenUsage(input_tokens=inp, output_tokens=out, total_tokens=total)
 
 
 def _to_openai_msg(msg: ChatMessage) -> dict[str, Any]:
     d: dict[str, Any] = {"role": msg.role, "content": msg.content}
     if msg.tool_calls:
-        d["tool_calls"] = [
-            {"id": tc.id, "type": "function", "function": {
-                "name": tc.name,
-                "arguments": json.dumps(tc.arguments, ensure_ascii=False) if isinstance(tc.arguments, dict) else tc.arguments,
-            }}
-            for tc in msg.tool_calls
-        ]
+        calls: list[dict[str, Any]] = []
+        for tc in msg.tool_calls:
+            if isinstance(tc.arguments, dict):
+                try:
+                    args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                except (TypeError, ValueError):
+                    args_str = str(tc.arguments)
+            else:
+                args_str = tc.arguments
+            calls.append({"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": args_str}})
+        d["tool_calls"] = calls
     if msg.name and msg.role != "tool":
         d["name"] = msg.name
     if msg.tool_call_id:
