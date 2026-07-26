@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import re
+import shlex
 import subprocess
 import sys
 
@@ -46,22 +47,30 @@ def _safe_import(name: str, *args, **kwargs) -> object:
         raise ImportError(f"module '{name}' is not allowed in restricted mode")
     return __import__(name, *args, **kwargs)
 
+# Block known sandbox-escape patterns in code strings.
+_ESCAPE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"__subclasses__\s*\("),
+    re.compile(r"__bases__"),
+    re.compile(r"__mro__\s*\("),
+    re.compile(r"__globals__"),
+    re.compile(r"\.gi_frame"),
+    re.compile(r"f_back"),
+]
+
 _RESTRICTED_BUILTINS: dict[str, object] = {
     "abs": abs, "all": all, "any": any, "ascii": ascii, "__import__": _safe_import,
     "bin": bin, "bool": bool, "bytearray": bytearray, "bytes": bytes,
     "callable": callable, "chr": chr, "complex": complex,
     "dict": dict, "dir": dir, "divmod": divmod, "enumerate": enumerate,
     "filter": filter, "float": float, "format": format, "frozenset": frozenset,
-    "getattr": getattr, "hasattr": hasattr, "hash": hash, "hex": hex,
+    "hash": hash, "hex": hex,
     "id": id, "int": int, "isinstance": isinstance, "issubclass": issubclass,
     "iter": iter, "len": len, "list": list, "map": map, "max": max,
-    "min": min, "next": next, "object": object, "oct": oct, "ord": ord,
+    "min": min, "next": next, "oct": oct, "ord": ord,
     "pow": pow, "print": print, "range": range, "repr": repr,
     "reversed": reversed, "round": round, "set": set,
     "slice": slice, "sorted": sorted, "str": str, "sum": sum,
-    "super": super, "tuple": tuple, "type": type, "vars": vars,
-    "zip": zip, "True": True, "False": False, "None": None,
-    "hasattr": hasattr, "setattr": setattr, "delattr": delattr,
+    "tuple": tuple, "zip": zip, "True": True, "False": False, "None": None,
 }
 
 _PYTHON_SAFE_IMPORTS = (
@@ -88,10 +97,19 @@ def shell(
     if blocked:
         return blocked
 
+    # Prefer shell=False to avoid shell injection. Try splitting safely.
+    # Fall back to shell=True only for commands needing pipes/redirects/env vars.
+    try:
+        cmd_list = shlex.split(command)
+        use_shell = False
+    except Exception:
+        cmd_list = command
+        use_shell = True
+
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            cmd_list if not use_shell else command,
+            shell=use_shell,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -99,6 +117,8 @@ def shell(
         )
     except subprocess.TimeoutExpired:
         return f"Command timed out after {timeout}s:\n{command[:200]}"
+    except FileNotFoundError:
+        return f"Error: command not found: {command[:200]}"
     except Exception as exc:
         return f"Error: {exc}"
 
@@ -149,6 +169,10 @@ SHELL_SPEC = ToolSpec(
 
 
 def python_exec(code: str, **kwargs) -> str:
+    for pat in _ESCAPE_PATTERNS:
+        if pat.search(code):
+            return "Error: code contains restricted patterns (sandbox escape attempt blocked)"
+
     namespace: dict[str, object] = {}
     _buf = io.StringIO()
     _old = sys.stdout

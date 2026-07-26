@@ -16,3 +16,4 @@ own-agent.toml
 
 # Sessions (conversation history)
 sessions/
+.env.example

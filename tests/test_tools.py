@@ -131,6 +131,12 @@ def test_python_exec_restricted_import():
     assert "not allowed" in r
 
 
+def test_python_exec_sandbox_escape_blocked():
+    from own_agent.tools.shell import python_exec
+    r = python_exec(code='type.__subclasses__(type)')
+    assert "blocked" in r.lower() or "restricted" in r.lower()
+
+
 def test_replace_all_in_schema():
     reg = ToolRegistry()
     register_all_tools(reg)
