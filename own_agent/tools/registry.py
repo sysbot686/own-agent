@@ -50,4 +50,7 @@ class ToolRegistry:
 
         if isinstance(result, ToolResult):
             return result
-        return ToolResult(success=True, output=str(result))
+        output = str(result)
+        if output.startswith("Error:"):
+            return ToolResult(success=False, error=output)
+        return ToolResult(success=True, output=output)

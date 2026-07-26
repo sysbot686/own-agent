@@ -19,6 +19,7 @@ class SessionManager:
     def new(self, title: str = "") -> Session:
         session = self._store.create(title=title)
         self._current = session
+        self._store.save(session)
         return session
 
     def resume(self, sid: str) -> Session | None:
