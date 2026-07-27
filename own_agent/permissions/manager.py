@@ -35,9 +35,10 @@ class PermissionManager:
             logger.info("BYPASS: %s — %s", action, details[:200])
             return ApprovalResult(approved=True, reason="bypass mode")
 
-        if self.mode == PermissionMode.LENIENT:
-            if not any(k in details.lower() for k in _SENSITIVE_KINDS):
-                return ApprovalResult(approved=True, reason="lenient: non-sensitive")
+        is_sensitive = any(k in details.lower() for k in _SENSITIVE_KINDS)
+
+        if not is_sensitive and self.mode in (PermissionMode.LENIENT, PermissionMode.STANDARD):
+            return ApprovalResult(approved=True, reason=f"{self.mode.value}: non-sensitive")
 
         if self._on_request:
             return ApprovalResult(approved=self._on_request(action, details, self.mode))

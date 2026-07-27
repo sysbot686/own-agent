@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import sys
@@ -17,6 +18,7 @@ from own_agent.context.rag.manager import RagConfig, RagManager
 from own_agent.permissions.manager import PermissionManager
 from own_agent.permissions.types import PermissionMode
 from own_agent.providers.presets import ProviderPreset, get_preset
+from own_agent.skills.loader import SkillLoader
 from own_agent.session.manager import SessionManager
 from own_agent.session.store import SessionStore
 from own_agent.tools import ToolRegistry, register_all_tools
@@ -136,6 +138,12 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
     tool_registry = ToolRegistry()
     register_all_tools(tool_registry)
 
+    skills_dir = Path("skills")
+    skill_loader = SkillLoader([skills_dir]) if skills_dir.exists() else SkillLoader()
+    skills = skill_loader.list_skills()
+    if skills:
+        console.print(f"[dim]Loaded {len(skills)} skills[/]")
+
     session_store = SessionStore()
     session_mgr = SessionManager(session_store)
     session_mgr.new(title="main")
@@ -158,6 +166,7 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
         config=agent_config,
     )
     agent.set_rag(rag_mgr if rag_enabled else None)
+    agent.set_skills(skills)
 
     print_welcome()
 
@@ -245,46 +254,37 @@ async def _run_single_prompt(agent: Agent, text: str) -> None:
             if event.kind == "text":
                 console.print(Markdown(event.text) if event.text.strip().startswith(("#", "-", "1.")) else event.text, end="")
             elif event.kind == "reasoning":
-                console.print(f"[dim]🧠 {event.text}[/]")
+                console.print(f"[dim]... {event.text}[/]")
             elif event.kind == "tool_call":
-                console.print(f"[cyan]🔧 {event.tool_name}(...)[/]")
+                console.print(f"[cyan]> {event.tool_name}(...)[/]")
             elif event.kind == "tool_result":
                 result = event.tool_result[:500]
                 if event.tool_result.startswith("Error"):
-                    console.print(f"  [red]→ {result}[/]")
+                    console.print(f"  [red]-> {result}[/]")
                 else:
-                    console.print(f"  [green]→[/] [dim]{result}[/]")
+                    console.print(f"  [green]->[/] [dim]{result}[/]")
             elif event.kind == "error":
                 console.print(f"[red]Error: {event.error}[/]")
             elif event.kind == "done" and event.usage:
                 u = event.usage
-                console.print(f"\n[dim]▲ {u.get('input_tokens', '?')} in / {u.get('output_tokens', '?')} out / {u.get('total_tokens', '?')} total[/]")
+                console.print(f"\n[dim]in={u.get('input_tokens', '?')} out={u.get('output_tokens', '?')} total={u.get('total_tokens', '?')}[/]")
     except Exception as exc:
         console.print(f"[red]Agent error: {exc}[/]")
 
 
 def main() -> int:
-    args = [a for a in sys.argv[1:] if a]
-    model: str | None = None
-    prompt: str | None = None
-    i = 0
-    while i < len(args):
-        if args[i] in ("-m", "--model") and i + 1 < len(args):
-            model = args[i + 1]
-            i += 2
-        elif args[i] in ("-p", "--prompt") and i + 1 < len(args):
-            prompt = args[i + 1]
-            i += 2
-        elif args[i] in ("-h", "--help"):
-            print("Usage: ownagent [--model NAME] [--prompt TEXT]")
-            print("  --model, -m     Model name (e.g. deepseek/deepseek-chat)")
-            print("  --prompt, -p    Run a single prompt non-interactively")
-            return 0
-        else:
-            i += 1
+    parser = argparse.ArgumentParser(
+        prog="ownagent",
+        description="A local coding agent.",
+    )
+    parser.add_argument("-m", "--model", help="Model name (e.g. deepseek/deepseek-chat)")
+    parser.add_argument("-p", "--prompt", help="Run a single prompt non-interactively")
+    parser.add_argument("--version", action="version", version="own-agent 0.1.0")
+
+    parsed = parser.parse_args()
 
     try:
-        asyncio.run(run_cli(model=model, prompt=prompt))
+        asyncio.run(run_cli(model=parsed.model, prompt=parsed.prompt))
     except KeyboardInterrupt:
         pass
     return 0

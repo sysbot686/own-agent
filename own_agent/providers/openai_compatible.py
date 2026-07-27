@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import queue
-import threading
 from collections.abc import AsyncIterator
 from typing import Any
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from own_agent.providers.base import ChatProvider
-from own_agent.providers.errors import ProviderError, ProviderErrorKind, classify_error, classify_exception
+from own_agent.providers.errors import ProviderError, ProviderErrorKind, classify_exception
 from own_agent.providers.types import (
     ChatMessage, ChatRequest, ChatResponse, ChatStreamEvent,
     FinishReason, ProviderCapabilities, ProviderDiagnostics,
@@ -45,7 +43,7 @@ class OpenAICompatibleProvider(ChatProvider):
                 kwargs["base_url"] = base_url
             if extra_headers:
                 kwargs["default_headers"] = extra_headers
-            self._client = OpenAI(**kwargs)
+            self._client = AsyncOpenAI(**kwargs)
 
     @property
     def name(self) -> str:
@@ -56,9 +54,12 @@ class OpenAICompatibleProvider(ChatProvider):
         return self._model
 
     def complete(self, request: ChatRequest) -> ChatResponse:
+        return asyncio.run(self.acomplete(request))
+
+    async def acomplete(self, request: ChatRequest) -> ChatResponse:
         params = self._build_params(request)
         try:
-            response = self._client.chat.completions.create(**params)
+            response = await self._client.chat.completions.create(**params)
         except Exception as exc:
             raise ProviderError(classify_exception(exc), str(exc)) from exc
 
@@ -98,22 +99,14 @@ class OpenAICompatibleProvider(ChatProvider):
         response_model = self._model
 
         try:
-            stream = await asyncio.to_thread(self._client.chat.completions.create, **params)
+            stream = await self._client.chat.completions.create(**params)
         except Exception as exc:
             raise ProviderError(classify_exception(exc), str(exc)) from exc
 
         yield ChatStreamEvent(kind="message_started")
-        q, stop = _start_stream_worker(stream)
 
         try:
-            while True:
-                item = await asyncio.to_thread(q.get)
-                if item is _STREAM_END:
-                    break
-                if isinstance(item, _StreamFailure):
-                    raise ProviderError(classify_exception(item.error), str(item.error))
-
-                chunk = item
+            async for chunk in stream:
                 response_model = _field(chunk, "model", response_model) or response_model
                 choices = _field(chunk, "choices", []) or []
                 if not choices:
@@ -136,7 +129,7 @@ class OpenAICompatibleProvider(ChatProvider):
                 for event in _accum_tool_deltas(_field(delta, "tool_calls", []) or [], tool_accums, diag):
                     yield event
         finally:
-            await asyncio.to_thread(stop)
+            await stream.close()
 
         finish = _normalize_finish(raw_finish)
         diag.raw_finish_reason = raw_finish
@@ -273,43 +266,6 @@ class _ToolAccum:
         self.name = ""
         self.arguments_text = ""
         self.saw_arguments = False
-
-
-_STREAM_END = object()
-
-
-class _StreamFailure:
-    def __init__(self, error: BaseException) -> None:
-        self.error = error
-
-
-def _start_stream_worker(stream):
-    q: queue.Queue[Any] = queue.Queue()
-    stop_event = threading.Event()
-
-    def stop():
-        stop_event.set()
-        close = getattr(stream, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:
-                pass
-
-    def worker():
-        try:
-            for item in stream:
-                if stop_event.is_set():
-                    break
-                q.put(item)
-        except BaseException as exc:
-            q.put(_StreamFailure(exc))
-        finally:
-            stop()
-            q.put(_STREAM_END)
-
-    threading.Thread(target=worker, daemon=True).start()
-    return q, stop
 
 
 def _accum_tool_deltas(

@@ -24,9 +24,16 @@ def test_lenient_sensitive_no_callback():
     assert "no approval" in r.reason
 
 
-def test_standard_no_callback():
+def test_standard_no_callback_non_sensitive():
     pm = PermissionManager(mode=PermissionMode.STANDARD)
     r = pm.request("anything", "details")
+    assert r.approved
+    assert "non-sensitive" in r.reason
+
+
+def test_standard_no_callback_sensitive():
+    pm = PermissionManager(mode=PermissionMode.STANDARD)
+    r = pm.request("write", "write test.txt")
     assert not r.approved
     assert "no approval" in r.reason
 
@@ -39,12 +46,19 @@ def test_standard_with_callback():
     assert r.approved
 
 
-def test_aggressive():
+def test_aggressive_sensitive():
     def cb(action, details, mode):
         return True
     pm = PermissionManager(mode=PermissionMode.AGGRESSIVE, on_request=cb)
     r = pm.request("shell", "run command")
     assert r.approved
+
+
+def test_aggressive_non_sensitive_needs_callback():
+    pm = PermissionManager(mode=PermissionMode.AGGRESSIVE)
+    r = pm.request("ls", "list dir")
+    assert not r.approved
+    assert "no approval" in r.reason
 
 
 def test_needs_approval():

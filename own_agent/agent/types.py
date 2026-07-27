@@ -25,3 +25,5 @@ class AgentConfig:
     max_tool_errors: int = 5
     temperature: float = 0.0
     max_tokens: int = 16384
+    max_retries: int = 2
+    retry_delay: float = 2.0

@@ -7,11 +7,13 @@ from own_agent.agent.types import AgentConfig, AgentEvent
 from own_agent.context.rag.manager import RagManager
 from own_agent.permissions.manager import PermissionManager
 from own_agent.providers.base import ChatProvider
+from own_agent.providers.errors import ProviderError, classify_exception, ProviderErrorKind
 from own_agent.providers.types import (
-    ChatMessage, ChatRequest, FinishReason, ToolCall, ToolChoice, ToolChoiceFunction, ToolDefinition,
-    TokenUsage,
+    ChatMessage, ChatRequest, ChatStreamEvent, FinishReason, ToolCall, ToolChoice, ToolChoiceFunction,
+    ToolDefinition, TokenUsage,
 )
 from own_agent.session.manager import SessionManager
+from own_agent.skills.loader import Skill
 from own_agent.tools.context import ExecutionContext
 from own_agent.tools.registry import ToolRegistry
 from own_agent.tools.types import ToolResult, ToolSpec
@@ -47,12 +49,19 @@ class Agent:
         self._permissions = permission_manager
         self._config = config or AgentConfig()
         self._rag: RagManager | None = None
+        self._skills: list[Skill] = []
+        self._tool_defs: list[ToolDefinition] | None = None
+        self._cached_system_prompt: str | None = None
 
     def set_rag(self, rag: RagManager | None) -> None:
         self._rag = rag
 
     def set_provider(self, provider: ChatProvider) -> None:
         self._provider = provider
+
+    def set_skills(self, skills: list[Skill]) -> None:
+        self._skills = skills
+        self._cached_system_prompt = None
 
     async def run(self, user_input: str) -> AsyncIterator[AgentEvent]:
         self._sessions.add_message(ChatMessage(role="user", content=user_input))
@@ -93,27 +102,40 @@ class Agent:
             events: list[AgentEvent] = []
             response = None
             reasoning_text = ""
+            _RETRYABLE = frozenset({ProviderErrorKind.TIMEOUT, ProviderErrorKind.RATE_LIMIT, ProviderErrorKind.NETWORK_ERROR, ProviderErrorKind.SERVER_ERROR})
 
-            try:
-                async for event in self._provider.astream(request):
-                    if event.kind == "reasoning_delta":
-                        reasoning_text += event.text or ""
-                    elif event.kind == "text_delta":
-                        if not events or events[-1].kind != "text":
-                            events.append(AgentEvent(kind="text"))
-                        events[-1].text += event.text or ""
-                    elif event.kind == "tool_call_started":
-                        yield AgentEvent(
-                            kind="tool_call", tool_call_id=event.tool_call_id or "",
-                            tool_name=event.tool_name or "",
-                        )
-                    elif event.kind == "message_completed":
-                        response = event.response
-                        if response.usage:
-                            all_usage.append(response.usage)
-            except Exception as exc:
-                yield AgentEvent(kind="error", error=str(exc))
-                return
+            for attempt in range(1 + self._config.max_retries):
+                try:
+                    async for event in self._provider.astream(request):
+                        if event.kind == "reasoning_delta":
+                            reasoning_text += event.text or ""
+                        elif event.kind == "text_delta":
+                            if not events or events[-1].kind != "text":
+                                events.append(AgentEvent(kind="text"))
+                            events[-1].text += event.text or ""
+                        elif event.kind == "tool_call_started":
+                            yield AgentEvent(
+                                kind="tool_call", tool_call_id=event.tool_call_id or "",
+                                tool_name=event.tool_name or "",
+                            )
+                        elif event.kind == "message_completed":
+                            response = event.response
+                            if response.usage:
+                                all_usage.append(response.usage)
+                    break  # success
+                except Exception as exc:
+                    if isinstance(exc, ProviderError):
+                        can_retry = exc.retryable
+                    else:
+                        can_retry = classify_exception(exc) in _RETRYABLE
+                    if not can_retry or attempt >= self._config.max_retries:
+                        yield AgentEvent(kind="error", error=str(exc))
+                        return
+                    yield AgentEvent(kind="text", text=f"\n[retry {attempt + 1}/{self._config.max_retries}...]\n")
+                    events = []
+                    reasoning_text = ""
+                    response = None
+                    await asyncio.sleep(self._config.retry_delay)
 
             if response is None:
                 yield AgentEvent(kind="error", error="no response from provider")
@@ -187,21 +209,28 @@ class Agent:
         yield AgentEvent(kind="done", finish_reason="error", usage=self._combine_usage(all_usage))
 
     def _build_system_prompt(self) -> str:
-        tools_desc = "\n".join(
-            f"- {s.name}: {s.description}"
-            for s in self._tools.list_specs()
-        )
-        return SYSTEM_PROMPT.format(tools_description=tools_desc)
+        if self._cached_system_prompt is None:
+            tools_desc = "\n".join(
+                f"- {s.name}: {s.description}"
+                for s in self._tools.list_specs()
+            )
+            skills_block = ""
+            if self._skills:
+                parts = []
+                for sk in self._skills:
+                    header = f"## {sk.name}" + (f": {sk.description}" if sk.description else "")
+                    parts.append(f"{header}\n{sk.content}")
+                skills_block = "\n\n---\nLoaded skills:\n" + "\n\n".join(parts)
+            self._cached_system_prompt = SYSTEM_PROMPT.format(tools_description=tools_desc) + skills_block
+        return self._cached_system_prompt
 
     def _get_tool_definitions(self) -> list[ToolDefinition]:
-        return [
-            ToolDefinition(
-                name=s.name,
-                description=s.description,
-                parameters=s.parameters,
-            )
-            for s in self._tools.list_specs()
-        ]
+        if self._tool_defs is None:
+            self._tool_defs = [
+                ToolDefinition(name=s.name, description=s.description, parameters=s.parameters)
+                for s in self._tools.list_specs()
+            ]
+        return self._tool_defs
 
     @staticmethod
     def _combine_usage(all_usage: list[TokenUsage | None]) -> dict | None:
