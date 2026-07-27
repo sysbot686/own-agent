@@ -27,6 +27,9 @@ Conversation:
 {conversation}
 """
 
+REPLAN_HINT = "(You have been working for several turns without updating your plan. Consider reviewing progress or creating a plan if the task is complex.)"
+PLAN_HINT_INTERVAL = 5
+
 SYSTEM_PROMPT = """You are own-agent, a coding agent that helps users with software engineering tasks.
 You have access to a set of tools to explore codebases, read and edit files, and run commands.
 
@@ -40,6 +43,7 @@ Instructions:
 4. When editing files, prefer targeted edits over full rewrites
 5. If you encounter errors, analyze and fix them
 6. When a task is complete, summarize what was done
+7. For complex tasks, use the plan tool to break down the work before starting. Update your plan as you make progress.
 """
 
 
@@ -65,6 +69,7 @@ class Agent:
             max_tokens=self._config.context_window,
             llm_summarize=self._summarize,
         )
+        self._rounds_without_plan = 0
 
     async def _summarize(self, messages: list[ChatMessage]) -> str:
         text = "\n".join(f"{m.role}: {m.content[:200]}" for m in messages if m.content)
@@ -115,6 +120,14 @@ class Agent:
             messages = [system_msg]
             if rag_context:
                 messages.append(ChatMessage(role="system", content=rag_context))
+            plan_text = (
+                self._sessions.current.metadata.get("plan", "")
+                if self._sessions.current else ""
+            )
+            if plan_text:
+                messages.append(ChatMessage(role="system", content=f"## Current Plan\n{plan_text}"))
+            if self._rounds_without_plan >= PLAN_HINT_INTERVAL:
+                messages.append(ChatMessage(role="system", content=REPLAN_HINT))
             chat_msgs = await self._ctx_mgr.compress(self._sessions.all_messages())
             messages += chat_msgs
 
@@ -203,6 +216,12 @@ class Agent:
                 )
 
                 for tc in response.tool_calls:
+                    if tc.name == "plan":
+                        plan_content = tc.arguments.get("plan_text", "")
+                        if self._sessions.current:
+                            self._sessions.current.metadata["plan"] = plan_content
+                            self._sessions.save()
+                        self._rounds_without_plan = 0
                     tool_result = await asyncio.to_thread(self._tools.call, tc.name, ctx=ctx, **tc.arguments)
                     if isinstance(tool_result, ToolResult) and not tool_result.success:
                         content = f"Error: {tool_result.error}"
@@ -218,6 +237,9 @@ class Agent:
                         tool_call_id=tc.id,
                     ))
                     self._ctx_mgr.check(self._sessions.all_messages())
+
+                if not any(tc.name == "plan" for tc in response.tool_calls):
+                    self._rounds_without_plan += 1
 
                 if tool_errors >= self._config.max_tool_errors:
                     yield AgentEvent(kind="error", error=f"too many tool errors ({tool_errors})")

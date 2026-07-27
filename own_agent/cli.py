@@ -99,6 +99,8 @@ def print_help():
         "  /model <m>   Switch model\n"
         "  /clear       Clear screen\n"
         "  /status      Show session info\n"
+        "  /plan        Show current plan\n"
+        "  /plan clear  Clear current plan\n"
         "  /reindex     Re-index project for RAG\n"
         "  /rag on/off  Enable/disable RAG\n"
     ))
@@ -213,6 +215,19 @@ async def run_cli(model: str | None = None, prompt: str | None = None) -> None:
                 console.print(f"[cyan]Session:[/] {cur.id[:8]} | [cyan]Messages:[/] {len(cur.messages)}")
             else:
                 console.print("[dim]No active session[/]")
+            continue
+        if text == "/plan":
+            plan = session_mgr.current.metadata.get("plan", "") if session_mgr.current else ""
+            if plan:
+                console.print(Panel(plan, title="Current Plan"))
+            else:
+                console.print("[dim]No plan set[/]")
+            continue
+        if text == "/plan clear":
+            if session_mgr.current:
+                session_mgr.current.metadata.pop("plan", None)
+                session_mgr.save()
+            console.print("[green]Plan cleared[/]")
             continue
         if text.startswith("/model "):
             new_model = text[7:].strip()
