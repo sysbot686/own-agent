@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 from own_agent.providers.types import ChatMessage
 
@@ -33,46 +32,40 @@ class ContextManager:
         self._max_tokens = max_tokens
         self._llm_summarize = llm_summarize
         self._summary: str = ""
-        self._summary_stale = False
-        self._last_archived_idx = 0
-        self._messages: list[ChatMessage] = []
+        self._archived_up_to: int = 0
+        self._pending = False
+
+    def check(self, messages: list[ChatMessage]) -> None:
+        """Check if compression is needed. Call after new messages arrive."""
+        if _count_messages_tokens(messages) > self._max_tokens * LEVEL1_TRIGGER:
+            self._pending = True
 
     @property
-    def messages(self) -> list[ChatMessage]:
-        return list(self._messages)
+    def needs_compression(self) -> bool:
+        return self._pending
 
-    def add_messages(self, msgs: list[ChatMessage]) -> None:
-        self._messages.extend(msgs)
-        if _count_messages_tokens(self._messages) > self._max_tokens * LEVEL1_TRIGGER:
-            self._archive()
+    async def compress(self, messages: list[ChatMessage]) -> list[ChatMessage]:
+        if not self._pending:
+            return messages
+        cutoff = max(self._archived_up_to, len(messages) // 2)
+        to_summarize = messages[self._archived_up_to:cutoff]
+        self._archived_up_to = cutoff
 
-    def compressed(self) -> list[ChatMessage]:
-        if not self._summary:
-            return list(self._messages)
-        placeholder = ChatMessage(
-            role="system",
-            content=f"<compressed_history>\n{self._summary}\n</compressed_history>",
-        )
-        recent = self._messages[self._last_archived_idx:]
-        return [placeholder] + recent
-
-    def _archive(self) -> None:
-        cutoff = max(self._last_archived_idx, len(self._messages) // 2)
-        archived = self._messages[self._last_archived_idx:cutoff]
-        self._last_archived_idx = cutoff
-
-        if archived and self._llm_summarize is not None:
+        if to_summarize and self._llm_summarize:
             try:
-                new_summary = self._llm_summarize(archived)
+                new_summary = await self._llm_summarize(to_summarize)
                 if new_summary:
                     self._summary = new_summary
             except Exception:
                 pass
 
-        self._summary_stale = True
+        self._pending = False
 
-    def needs_summary(self) -> bool:
-        return self._summary_stale and self._llm_summarize is not None
+        if not self._summary:
+            return messages
 
-    def can_skip_summary(self) -> bool:
-        return _count_messages_tokens(self._messages) < self._max_tokens
+        placeholder = ChatMessage(
+            role="system",
+            content=f"<compressed_history>\n{self._summary}\n</compressed_history>",
+        )
+        return [placeholder] + messages[self._archived_up_to:]

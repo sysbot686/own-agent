@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 
 from own_agent.agent.types import AgentConfig, AgentEvent
+from own_agent.context.manager import ContextManager
 from own_agent.context.rag.manager import RagManager
 from own_agent.permissions.manager import PermissionManager
 from own_agent.providers.base import ChatProvider
@@ -17,6 +18,14 @@ from own_agent.skills.loader import Skill
 from own_agent.tools.context import ExecutionContext
 from own_agent.tools.registry import ToolRegistry
 from own_agent.tools.types import ToolResult, ToolSpec
+
+SUMMARY_PROMPT = """Summarize the following conversation between a user and an AI coding agent.
+Focus on: what tasks were completed, what files were modified, what decisions were made.
+Keep the summary concise (2-4 sentences).
+
+Conversation:
+{conversation}
+"""
 
 SYSTEM_PROMPT = """You are own-agent, a coding agent that helps users with software engineering tasks.
 You have access to a set of tools to explore codebases, read and edit files, and run commands.
@@ -52,6 +61,22 @@ class Agent:
         self._skills: list[Skill] = []
         self._tool_defs: list[ToolDefinition] | None = None
         self._cached_system_prompt: str | None = None
+        self._ctx_mgr = ContextManager(
+            max_tokens=self._config.context_window,
+            llm_summarize=self._summarize,
+        )
+
+    async def _summarize(self, messages: list[ChatMessage]) -> str:
+        text = "\n".join(f"{m.role}: {m.content[:200]}" for m in messages if m.content)
+        prompt = SUMMARY_PROMPT.format(conversation=text[:4000])
+        try:
+            response = await self._provider.acomplete(ChatRequest(
+                messages=[ChatMessage(role="user", content=prompt)],
+                max_tokens=512,
+            ))
+            return response.content
+        except Exception:
+            return ""
 
     def set_rag(self, rag: RagManager | None) -> None:
         self._rag = rag
@@ -65,6 +90,7 @@ class Agent:
 
     async def run(self, user_input: str) -> AsyncIterator[AgentEvent]:
         self._sessions.add_message(ChatMessage(role="user", content=user_input))
+        self._ctx_mgr.check(self._sessions.all_messages())
 
         tool_errors = 0
         tool_rounds = 0
@@ -89,7 +115,8 @@ class Agent:
             messages = [system_msg]
             if rag_context:
                 messages.append(ChatMessage(role="system", content=rag_context))
-            messages += self._sessions.all_messages()
+            chat_msgs = await self._ctx_mgr.compress(self._sessions.all_messages())
+            messages += chat_msgs
 
             request = ChatRequest(
                 messages=messages,
@@ -156,6 +183,7 @@ class Agent:
                 tool_calls=response.tool_calls or None,
             )
             self._sessions.add_message(assistant_msg)
+            self._ctx_mgr.check(self._sessions.all_messages())
 
             if finish == "stop":
                 yield AgentEvent(kind="done", finish_reason="stop", usage=self._combine_usage(all_usage))
@@ -189,6 +217,7 @@ class Agent:
                         content=content[:10000],
                         tool_call_id=tc.id,
                     ))
+                    self._ctx_mgr.check(self._sessions.all_messages())
 
                 if tool_errors >= self._config.max_tool_errors:
                     yield AgentEvent(kind="error", error=f"too many tool errors ({tool_errors})")

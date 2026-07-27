@@ -27,3 +27,4 @@ class AgentConfig:
     max_tokens: int = 16384
     max_retries: int = 2
     retry_delay: float = 2.0
+    context_window: int = 128000
