@@ -14,7 +14,7 @@ from rich.table import Table
 from own_agent.agent.loop import Agent
 from own_agent.agent.types import AgentConfig
 from own_agent.config import load_config
-from own_agent.context.rag.manager import RagConfig, RagManager
+from own_agent.context.rag.manager import RagManager
 from own_agent.permissions.manager import PermissionManager
 from own_agent.permissions.types import PermissionMode
 from own_agent.providers.presets import ProviderPreset, get_preset
@@ -35,7 +35,7 @@ def _build_provider(config, model: str | None = None):
 
     api_key = config.get_provider_value(
         "api_key", env=preset.api_key_env,
-    ) or config.get_env(preset.api_key_env) or ""
+    ) or ""
     base_url = config.get_provider_value(
         "base_url", env=preset.base_url_env, default=preset.default_base_url,
     )
@@ -65,7 +65,7 @@ def _get_permission_mode(config) -> PermissionMode:
         return PermissionMode.STANDARD
 
 
-def _interactive_approval(action: str, details: str, _mode: object = None) -> bool:
+def _interactive_approval(action: str, details: str, _mode: str = "") -> bool:
     console.print()
     console.print(Panel(f"[yellow]Permission Request[/]\n[b]{action}[/]\n{details[:500]}", title="⚠️  Approval"))
     while True:

@@ -7,6 +7,8 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+from anthropic import AsyncAnthropic
+
 from own_agent.providers.base import ChatProvider
 from own_agent.providers.errors import ProviderError, ProviderErrorKind, classify_exception
 from own_agent.providers.types import (
@@ -38,13 +40,12 @@ class AnthropicProvider(ChatProvider):
         if client is not None:
             self._client = client
         else:
-            from anthropic import Anthropic
             kwargs: dict[str, Any] = {"api_key": api_key}
             if base_url:
                 kwargs["base_url"] = base_url
             if extra_headers:
                 kwargs["default_headers"] = extra_headers
-            self._client = Anthropic(**kwargs)
+            self._client = AsyncAnthropic(**kwargs)
 
     @property
     def name(self) -> str:
@@ -55,9 +56,12 @@ class AnthropicProvider(ChatProvider):
         return self._model
 
     def complete(self, request: ChatRequest) -> ChatResponse:
+        return asyncio.run(self.acomplete(request))
+
+    async def acomplete(self, request: ChatRequest) -> ChatResponse:
         params = self._build_params(request)
         try:
-            response = self._client.messages.create(**params)
+            response = await self._client.messages.create(**params)
         except Exception as exc:
             raise ProviderError(classify_exception(exc), str(exc)) from exc
 
@@ -119,6 +123,74 @@ class AnthropicProvider(ChatProvider):
         if not self._capabilities.supports_parallel_tool_calls:
             payload["disable_parallel_tool_use"] = True
         return payload
+
+    async def astream(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+        if not self._capabilities.supports_streaming:
+            raise ProviderError(ProviderErrorKind.UNSUPPORTED, f"{self._name} does not support streaming")
+
+        params = self._build_params(request)
+        params["stream"] = True
+        diag = ProviderDiagnostics()
+        content: list[dict[str, Any]] = []
+        reasoning_parts: list[str] = []
+
+        try:
+            stream = await self._client.messages.create(**params)
+        except Exception as exc:
+            raise ProviderError(classify_exception(exc), str(exc)) from exc
+
+        yield ChatStreamEvent(kind="message_started")
+
+        try:
+            async for chunk in stream:
+                ctype = _field(chunk, "type", "")
+                if ctype == "content_block_start":
+                    block = _field(chunk, "content_block", {}) or {}
+                    if _field(block, "type") == "tool_use":
+                        idx = _field(chunk, "index", 0)
+                        yield ChatStreamEvent(
+                            kind="tool_call_started",
+                            tool_call_index=idx,
+                            tool_call_id=_field(block, "id", ""),
+                            tool_name=_field(block, "name", ""),
+                        )
+                elif ctype == "content_block_delta":
+                    delta = _field(chunk, "delta", {}) or {}
+                    dt = _field(delta, "type", "")
+                    if dt == "text_delta":
+                        text = _field(delta, "text", "") or ""
+                        content.append({"type": "text", "text": text})
+                        yield ChatStreamEvent(kind="text_delta", text=text)
+                    elif dt == "input_json_delta":
+                        partial = _field(delta, "partial_json", "") or ""
+                        idx = _field(chunk, "index", 0)
+                        yield ChatStreamEvent(kind="tool_call_delta", tool_call_index=idx, arguments_delta=partial)
+                    elif dt in ("thinking_delta", "signature_delta"):
+                        text = _field(delta, "text", "") or ""
+                        reasoning_parts.append(text)
+                        yield ChatStreamEvent(kind="reasoning_delta", text=text)
+                elif ctype == "message_delta":
+                    delta = _field(chunk, "delta", {}) or {}
+                    stop = _field(delta, "stop_reason")
+                    if stop:
+                        diag.raw_finish_reason = stop
+                elif ctype == "message_stop":
+                    pass
+        finally:
+            await stream.close()
+
+        finish = _normalize_stop(diag.raw_finish_reason)
+        diag.reasoning = "".join(reasoning_parts) or None
+
+        combined = _collect_text(content)
+        tool_calls = self._parse_tool_calls(content, diag)
+
+        response = ChatResponse(
+            provider=self._name, model=self._model,
+            content=combined, tool_calls=tool_calls,
+            finish_reason=finish, diagnostics=diag,
+        )
+        yield ChatStreamEvent(kind="message_completed", response=response, diagnostics=diag)
 
     @staticmethod
     def _parse_tool_calls(content: list[Any], diag: ProviderDiagnostics) -> list[ToolCall]:

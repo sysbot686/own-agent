@@ -33,5 +33,4 @@ class ChatProvider(ABC):
             ProviderErrorKind.UNSUPPORTED,
             f"provider {self.name} does not support streaming",
         )
-        if False:
-            yield
+        yield  # pragma: no cover

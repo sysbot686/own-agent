@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from own_agent.tools.types import ToolSpec
 
 

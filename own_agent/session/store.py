@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from own_agent.providers.types import ChatMessage, ToolCall
@@ -68,7 +68,7 @@ class SessionStore:
 
     def create(self, title: str = "", metadata: dict[str, str] | None = None) -> Session:
         sid = uuid.uuid4().hex[:12]
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         session = Session(id=sid, title=title, created_at=now, updated_at=now, metadata=metadata or {})
         return session
 
@@ -81,7 +81,7 @@ class SessionStore:
                 f.write(json.dumps(_msg_to_dict(msg), ensure_ascii=False) + "\n")
 
         session.message_count = len(session.messages)
-        session.updated_at = datetime.now()
+        session.updated_at = datetime.now(timezone.utc)
         self._update_index(session)
 
     def load(self, sid: str) -> Session | None:
